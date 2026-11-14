@@ -7,5 +7,7 @@ def job_dict(j):
     return {k:getattr(j,k) for k in ['id','name','dataset_id','params','status','result','error','approved','created_at','finished_at']}
 def report_dict(r):
     return {k:getattr(r,k) for k in ['id','name','job_id','destination','interval_seconds','next_run','enabled']}
+def period_dict(p):
+    return {k:getattr(p,k) for k in ['id','report_id','due_at','status','attempts','error','delivery_id','created_at','updated_at','completed_at']}
 def delivery_dict(d):
     return {k:getattr(d,k) for k in ['id','report_id','created_at','checksum','filename','destination']}

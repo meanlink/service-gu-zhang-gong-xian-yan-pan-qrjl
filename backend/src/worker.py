@@ -4,9 +4,9 @@ from sqlalchemy import select
 from redis import Redis
 from src.config.database import Session
 from src.config.settings import REDIS_URL
-from src.models import Job, Dataset, Report
+from src.models import Job, Dataset
 from src.services.business import analyze
-from src.services.reports import deliver
+from src.services import reports
 from src.services.audit import record
 logging.basicConfig(level=logging.INFO)
 def execute(job_id):
@@ -30,17 +30,22 @@ def tick():
         queued=list(db.scalars(select(Job.id).where(Job.status=='queued').limit(3)))
     for job_id in queued:execute(job_id)
     with Session() as db:
-        for r in db.scalars(select(Report).where(Report.enabled==True,Report.next_run<=time.time())):
-            d=deliver(db,r)
-            if d:record(db,'worker','report.delivered',{'id':r.id,'delivery':d.id})
+        # 先按计划应发时点补齐停机期间跨过的每一期，再逐期处理。
+        reports.generate_periods(db,time.time())
+        for period_id,delivery_id in reports.process_due(db,time.time()):
+            record(db,'worker','report.delivered',{'period':period_id,'delivery':delivery_id})
         db.commit()
+    reports.cleanup_temps()
 def main():
     r=Redis.from_url(REDIS_URL,socket_timeout=3)
     # This Compose stack has a single worker. A crash must not strand its jobs.
     with Session() as db:
         for j in db.scalars(select(Job).where(Job.status=='running')):
             j.status='queued';record(db,'worker','job.recovered',{'id':j.id})
+        recovered=reports.recover_interrupted(db)
+        if recovered:record(db,'worker','report.recovered',{'periods':recovered})
         db.commit()
+    reports.cleanup_temps()
     while True:
         Path('/tmp/heartbeat').touch()
         try:
